@@ -1,147 +1,61 @@
-## altschool_eks_project
+## Project summary — what this repo contains and what you did
 
-Overview
---------
-This repository contains Terraform infrastructure and Kubernetes manifests to provision and run a sample retail application on AWS EKS, fronted by an AWS Application Load Balancer (ALB). The infra is defined in `infra/` and the k8s manifests are in `k8s-manifest/`.
+This README has been trimmed to only describe the artifacts present in this repository and the actions you performed here.
 
-What you'll find
------------------
-- `infra/` - Terraform configs (VPC, subnets, NAT/IGW, EKS cluster, IAM roles, ALB-related resources and a remote backend)
-- `infra/remote-backend/` - Terraform backend config for remote state (S3 + DynamoDB)
-- `k8s-manifest/` - Kubernetes manifests (Ingress, RBAC, etc.) used to deploy the retail app
+What is in this repository
+- `infra/` — Terraform configurations used in this project. Key files you created/used include:
+  - `vpc.tf`, `subnets.tf`, `igw.tf`, `routes.tf`, `natgw.tf` — networking
+  - `eks.tf` — EKS cluster resource and IAM role definitions (note: contains an `access_config` block in your copy; this is unsupported by the upstream provider and should be removed before apply)
+  - `alb.tf`, `alb-role.tf` — ALB related resources and IAM role for the ingress controller
+  - `providers.tf`, `locals.tf`, `user.tf`, `nodes_iamroles.tf`, `iam-policy.json`, `trust-policy.json` — provider and IAM pieces
+  - `remote-backend/` — example S3/DynamoDB backend configuration for storing Terraform state remotely
 
-Quick summary
--------------
-- Provision infrastructure with Terraform (S3 remote state supported)
-- Create an EKS cluster and node IAM roles
-- Deploy application manifests to the cluster and expose via ALB ingress
+- `k8s-manifest/` — Kubernetes manifests you included:
+  - `ingress.yaml` — ALB ingress manifest
+  - `viewer-cluster-role.yaml` and `viewer-cluster-role-binding.yaml` — example RBAC resources
 
-Prerequisites
--------------
-- Terraform v1.0+ installed and configured
-- AWS CLI v2 configured with credentials that have sufficient permissions
-- kubectl installed
-- An AWS account with permissions for EKS, EC2, IAM, S3, ACM, and ELB
+What you did in this project (actions recorded here)
+- Wrote Terraform configurations to provision VPC networking, subnets, NAT/IGW, and an EKS cluster.
+- Created IAM roles and policies required for EKS and the ALB ingress controller (files in `infra/`).
+- Included a remote backend example under `infra/remote-backend/` to store Terraform state in S3 with DynamoDB locking.
+- Added Kubernetes manifests for an ALB ingress and example RBAC rules under `k8s-manifest/`.
 
-Repository structure
---------------------
-infra/
-- `providers.tf` - provider and region configuration
-- `vpc.tf`, `subnets.tf`, `igw.tf`, `routes.tf` - networking
-- `eks.tf` - EKS cluster and IAM roles for the cluster
-- `alb.tf`, `alb-role.tf` - ALB setup and IAM roles for ingress controller
-- `remote-backend/` - backend configuration (S3/DynamoDB)
+Quick commands you used or will use (as part of this repo)
+- Initialize Terraform (from `infra/`):
 
-k8s-manifest/
-- `ingress.yaml` - Ingress definition for ALB
-- `viewer-cluster-role.yaml` / `viewer-cluster-role-binding.yaml` - example RBAC
+  ```bash
+  cd infra
+  terraform init
+  terraform plan
+  terraform apply
+  ```
 
-How to use
-----------
-1. Configure your AWS credentials and region (example uses `eu-west-2`):
+- After the EKS cluster exists, update kubeconfig (use the exact cluster name from your Terraform state):
 
-```bash
-aws configure
-# or use a named profile
-aws configure --profile dev
-```
+  ```bash
+  aws eks update-kubeconfig --region eu-west-2 --name <cluster-name>
+  ```
 
-2. Initialize Terraform (from `infra/`):
+- Deploy the manifests you added:
 
-```bash
-cd infra
-terraform init
-terraform plan
-# review plan, then:
-terraform apply
-```
+  ```bash
+  kubectl create namespace retail-dev || true
+  kubectl apply -n retail-dev -f k8s-manifest/
+  ```
 
-3. After Terraform creates the EKS cluster, update kubeconfig so kubectl can talk to it:
+Important notes (directly relevant to what you have in the repo)
+- The `access_config` block in `infra/eks.tf` (if present) is unsupported by the `aws_eks_cluster` resource and will cause Terraform to fail. Remove that block before running `terraform apply`.
+- If `aws eks update-kubeconfig` reports "No cluster found for name", confirm the cluster name with:
 
-```bash
-aws eks update-kubeconfig --region <region> --name <cluster-name>
-# if you used a named profile:
-aws eks update-kubeconfig --region <region> --name <cluster-name> --profile dev --alias dev-cluster
-```
+  ```bash
+  cd infra
+  terraform state show aws_eks_cluster.eks
+  # or list clusters
+  aws eks list-clusters --region eu-west-2
+  ```
 
-4. Deploy Kubernetes manifests:
-
-```bash
-kubectl apply -f ../k8s-manifest/ -n retail-dev
-# create namespace first if needed
-kubectl create namespace retail-dev || true
-kubectl apply -f ../k8s-manifest/ -n retail-dev
-```
-
-Notes & known issues
---------------------
-- Terraform remote state: this repo includes `infra/remote-backend/` with example S3/DynamoDB backend configuration. Ensure you have the S3 bucket and DynamoDB table (or let Terraform create them) and that your AWS credentials can access them.
-- EKS `access_config` block: In some copies of `infra/eks.tf` there is an `access_config` block present. The AWS provider's `aws_eks_cluster` resource does not accept an `access_config` block — keeping it will cause Terraform apply to fail. If you see an `access_config` block in `infra/eks.tf`, remove it before running `terraform apply`.
-
-Example: remove this unsupported block from `infra/eks.tf` if present:
-
-```hcl
-# access_config {
-#   authentication_mode = "API"
-#   bootstrap_cluster_creator_admin_permissions = true
-# }
-```
-
-Troubleshooting
----------------
-- Error updating kubeconfig ("No cluster found for name")
-  - Confirm the cluster name: `terraform state show aws_eks_cluster.eks` or `aws eks list-clusters --region <region>`
-  - Ensure you're in the correct AWS region
-  - Confirm Terraform apply completed successfully and the `aws_eks_cluster` resource exists in state
-
-- If ALB Ingress doesn't route traffic:
-  - Check the AWS Load Balancer Controller is installed in the cluster
-  - Confirm ingress annotations in `k8s-manifest/ingress.yaml` are correct and point to the right ACM certificate ARN (if using HTTPS)
-  - Inspect ALB target groups health checks and security groups
-
-Useful commands
----------------
-- List clusters in a region:
-
-```bash
-aws eks list-clusters --region eu-west-2
-```
-
-- Show Terraform state for EKS resource (from `infra/`):
-
-```bash
-cd infra
-terraform state show aws_eks_cluster.eks || true
-```
-
-- Update kubeconfig once you have cluster name and region:
-
-```bash
-aws eks update-kubeconfig --region eu-west-2 --name <cluster-name>
-```
-
-Where to look next
-------------------
-- Terraform files: `infra/` for infrastructure details
-- Kubernetes manifests: `k8s-manifest/` for ingress and RBAC
-
-Contributing
-------------
-- Open a PR with small, focused changes
-- Run `terraform fmt` and `terraform validate` before opening a PR
-
-License & contact
------------------
-This repo does not include an explicit license file. If you need one, add a LICENSE that fits your intended use.
-
-If you want me to also:
-- add a short Makefile wrapper for common terraform/kubectl commands
-- add a GitHub Actions pipeline example for Terraform
-I can create those in follow-up changes.
-
----
-
-Generated README updated to reflect the repository layout and common commands.
+Want this even shorter or in a different format?
+- I can reduce this to a one-page checklist, convert it to a CHANGELOG-style summary of your steps, or add a small `Makefile` with the commands above. Tell me which and I'll add it.
 # Technical Report: End-to-End Deployment of a Retail Application on AWS EKS with ALB Integration
 [This is the link to my retail store at store.mijanscript.xyz](https://store.mijanscript.xyz/)
 PS: If link does not work, the instance has likely been stopped to save cost
